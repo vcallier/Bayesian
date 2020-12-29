@@ -1,0 +1,385 @@
+---
+title: "APPENDIX: Complete code and analysis"
+author: "Viviane, Ben, Cong"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+  html_notebook: default
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(car)
+library(coda)
+
+# to create publishable table
+library(sjPlot)
+library(stargazer)
+
+df <- read_excel("/Users/CongZhang/Documents/UTSA STATISTICS Master/Bayesian/project2/ENB2012_data.xlsx")
+
+```
+
+# Check the data set
+```{r}
+str(df)
+summary(df)   
+sum(is.na(df)) # no missing value
+sapply(df, sd)
+```
+
+
+# Response variables: Y1, Y2
+```{r}
+# Y1 
+
+# Plotting Histogram. Y1 is right skewed
+
+ggplot(data = df) + 
+  geom_histogram(mapping = aes(x = Y1), 
+                 fill  = "blue",
+                 color = "white", 
+                 binwidth = 5) + 
+  ggtitle("Y1 Frequencies") +
+  xlab("Y1 values") +
+  ylab("Frequency")
+
+
+# Y2 
+
+# Plotting Histogram. Y2 is right skewed 
+
+ggplot(data = df) + 
+  geom_histogram(mapping = aes(x = Y2), 
+                 fill  = "blue",
+                 color = "white", 
+                 binwidth = 5) + 
+  ggtitle("Y2 Frequencies") +
+  xlab("Y2 values") +
+  ylab("Frequency")
+
+
+# Box-plot for Y1 and Y2
+
+boxplot(df$Y1, df$Y2, 
+        main = "Y1 and Y2", names = c("Y1","Y2"),
+        col = c(5,6), xlab = "Values", horizontal = TRUE)
+```
+
+# Correlation table and scatter plots
+
+```{r fig.width=10, fig.height=10}
+# distribution of all independent variables
+par(mfrow = c(3,3))
+hist(df$X1)
+hist(df$X2)
+hist(df$X3)
+hist(df$X4)
+hist(df$X5)
+hist(df$X6)
+hist(df$X7)
+hist(df$X8)
+
+#  correlation and scatter plots
+round(cor(df[ ,c(1,3,5,7,9)]),2)
+
+pairs(df[ ,c(1,3,5,7,9)])
+```
+
+# Regress on Y1
+```{r fig.width=10, fig.height=10}
+# Regress on Y1
+
+fit1 <- lm(Y1 ~ X1 + X3 + X5 + X7, data=df)
+summary(fit1)
+confint(fit1)
+
+# Checking fit 
+
+par(mfrow = c(2,2)) 
+plot(fit1)  
+
+# Create regression table
+
+library(moderndive)
+get_regression_table(fit1)
+```
+
+
+# Check multicollinearity  
+```{r}
+vif(fit1)
+```
+
+Desire VIFs < 10.
+
+# Bayesian analysis
+```{r}
+############################################
+# Multiple linear regression
+#
+# Inputs:
+# Y = response vector
+# X = design matrix
+# a = prior mean for beta
+# R = prior covariance matrix for beta (i.e., phi^{-1} R)   
+# a0 = prior parameter for phi 
+# b0 = prior parameter for phi, where phi~Gamma(a0,b0)
+# G  = Number of Gibbs itreates
+# beta = initial value of regression coefficients
+# phi  = initial value of precission parameter 
+
+Gibbs.MLR<-function(Y,X,a,R,a0=0,b0=0,G,beta,phi,verbose=TRUE){
+
+  #########################
+  # Load necessary packages
+  library(mvtnorm)
+
+  p<-dim(X)[2]
+  n<-dim(X)[1]
+
+  beta.MCMC<-matrix(-99,nrow=G,ncol=p)
+  phi.MCMC<-rep(-99,G)
+
+  ################################
+  # quantities only computes once
+  # this is for the non-informative Jeffreys prior 
+
+  Ri<-solve(R)
+  Ria<-Ri%*%a
+  XTXRI<-solve(t(X)%*%X + Ri)
+  XTY<-t(X)%*%Y
+
+  for(g in 1:G){
+
+    Cv.beta<- XTXRI/phi
+    mu.beta<- XTXRI%*%(Ria+XTY)
+    beta<-as.vector(rmvnorm(1,mu.beta,Cv.beta))
+
+    a0star <- (n+p)/2 + a0
+    b0star <- (sum( (Y-X%*%beta)^2 )+(beta-a)%*%Ri%*%(beta-a))/2 + b0
+
+    phi<-rgamma(1,a0star,b0star)
+
+    ###################
+    # Saving the results
+    beta.MCMC[g,]<-beta
+    phi.MCMC[g]<-phi
+    if(verbose==TRUE){print(g)}
+  }
+
+  return(list("beta"=beta.MCMC,"phi"=phi.MCMC))
+}
+```
+
+```{r}
+###################################################################################
+###################################################################################
+# Generate a little data: Multiple Linear Regression
+
+n<-nrow(df)
+X<-cbind(rep(1, n), df$X1, df$X3, df$X5, df$X7)
+
+Y<-df$Y1
+
+a<-c(0,0,0,0,0)
+R<-diag(rep(10,5))
+a0<-0
+b0<-0
+
+##########################################################################
+# One initialization
+beta0 <- solve(t(X)%*%X)%*%t(X)%*%Y    #Initial values taken to be the MLE
+phi0 <- n/sum((Y-X%*%beta0)^2) 
+set.seed(1)
+res1<-Gibbs.MLR(Y=Y,X=X,a=a,R=R,a0=a0,b0=b0,G=5000,beta=beta0,phi=phi0,verbose=FALSE)
+```
+
+```{r fig.width=10, fig.height=10}
+######################
+# Summarize results
+
+par(mfrow=c(3,1))
+plot(res1$beta[,1], col="blue")
+plot(res1$beta[,2], col="blue")
+plot(res1$beta[,3], col="blue")
+plot(res1$beta[,4], col="blue")
+plot(res1$beta[,5], col="blue")
+plot(res1$phi, col="blue")
+```
+
+```{r}
+###################################
+# Summarizing the results
+
+(bayescoef <- apply(res1$beta[2500:5000,],2,mean))
+
+# Calculating sigma from phi
+sqrt(1/mean(res1$phi[2500:5000]))
+
+#Calculate Root MSE
+yhat <- X %*% bayescoef
+sqrt(sum((yhat-Y)^2)/(n-4-1))
+```
+
+```{r}
+# HPD intervals 
+library(coda)
+
+beta.mcmc = as.mcmc(res1$beta[2500:5000,])           # Coerce the vector into a MCMC object
+HPDinterval(beta.mcmc, prob = 0.95)                  # Find 95% HPD interval for theta using the CODA function
+
+phi.mcmc = as.mcmc(res1$phi[2500:5000])             # Coerce the vector into a MCMC object
+HPDinterval(sqrt(1/phi.mcmc), prob = 0.95)                  # Find 95% HPD interval for sigma2 using the CODA function
+```
+
+```{r fig.width=10, fig.height=10}
+par(mfrow=c(1,1))
+plot(beta.mcmc)
+plot(phi.mcmc)
+autocorr.plot(beta.mcmc)   #Check autocorrelation
+autocorr.plot(phi.mcmc)   #Check autocorrelation
+effectiveSize(beta.mcmc)   #Check effective size
+effectiveSize(phi.mcmc)   #Check effective size
+geweke.diag(beta.mcmc)   #Check for convergence using Geweke diagnostic -- absolute values beyond 2 suggest poor mixing
+geweke.diag(phi.mcmc)   #Check for convergence using Geweke diagnostic -- absolute values beyond 2 suggest poor mixing
+```
+
+
+```{r fig.width=10, fig.height=10}
+###################################################################################
+###################################################################################
+# Try a second prior: Multiple Linear Regression
+
+n<-nrow(df)
+X<-cbind(rep(1, n), df$X1, df$X3, df$X5, df$X7)
+
+Y<-df$Y1
+
+a<-c(-12,-15,0,6,20)
+R<-diag(rep(5,5))
+a0<-2
+b0<-4
+
+##########################################################################
+# One initialization
+beta0 <- solve(t(X)%*%X)%*%t(X)%*%Y    #Initial values taken to be the MLE
+phi0  <- n/sum((Y-X%*%beta0)^2) 
+res2<-Gibbs.MLR(Y=Y,X=X,a=a,R=R,a0=a0,b0=b0,G=5000,beta=beta0,phi=phi0,verbose=FALSE)
+
+######################
+# Summarize results
+
+par(mfrow=c(3,1))
+plot(res2$beta[,1], col="blue")
+plot(res2$beta[,2], col="blue")
+plot(res2$beta[,3], col="blue")
+plot(res2$beta[,4], col="blue")
+plot(res2$beta[,5], col="blue")
+plot(res2$phi, col="blue")
+
+###################################
+# Summarizing the results
+
+(bayescoef2 <- apply(res2$beta[2500:5000,],2,mean))
+
+# Calculating sigma from phi
+sqrt(1/mean(res2$phi[2500:5000]))
+
+#Calculate Root MSE
+yhat2 <- X %*% bayescoef2
+sqrt(sum((yhat2-Y)^2)/(n-4-1))
+
+#HPD intervals 
+
+beta2.mcmc = as.mcmc(res2$beta[2500:5000,])           # Coerce the vector into a MCMC object
+HPDinterval(beta2.mcmc, prob = 0.95)                  # Find 95% HPD interval for theta using the CODA function
+
+phi2.mcmc = as.mcmc(res2$phi[2500:5000])             # Coerce the vector into a MCMC object
+HPDinterval(sqrt(1/phi2.mcmc), prob = 0.95)                  # Find 95% HPD interval for theta using the CODA function
+
+par(mfrow=c(1,1))
+plot(beta2.mcmc)
+plot(phi2.mcmc)
+autocorr.plot(beta2.mcmc)   #Check autocorrelation
+autocorr.plot(phi2.mcmc)   #Check autocorrelation
+effectiveSize(beta2.mcmc)   #Check effective size
+effectiveSize(phi2.mcmc)   #Check effective size
+geweke.diag(beta2.mcmc)   #Check for convergence using Geweke diagnostic -- absolute values beyond 2 suggest poor mixing
+geweke.diag(phi2.mcmc)   #Check for convergence using Geweke diagnostic -- absolute values beyond 2 suggest poor mixing
+```
+
+```{r fig.width=10, fig.height=10}
+###################################################################################
+###################################################################################
+# Try a third prior: Multiple Linear Regression
+
+n<-nrow(df)
+X<-cbind(rep(1, n), df$X1, df$X3, df$X5, df$X7)
+
+Y<-df$Y1
+
+a<-c(5,3,-2,1,-7)
+R<-diag(rep(2,5))
+a0<-3
+b0<-1
+
+##########################################################################
+# One initialization
+beta0 <- solve(t(X)%*%X)%*%t(X)%*%Y    #Initial values taken to be the MLE
+phi0  <- n/sum((Y-X%*%beta0)^2) 
+res3<-Gibbs.MLR(Y=Y,X=X,a=a,R=R,a0=a0,b0=b0,G=5000,beta=beta0,phi=phi0,verbose=FALSE)
+
+######################
+# Summarize results
+
+par(mfrow=c(3,1))
+plot(res2$beta[,1], col="blue")
+plot(res2$beta[,2], col="blue")
+plot(res2$beta[,3], col="blue")
+plot(res2$beta[,4], col="blue")
+plot(res2$beta[,5], col="blue")
+plot(res2$phi, col="blue")
+
+###################################
+# Summarizing the results
+
+(bayescoef3 <- apply(res3$beta[2500:5000,],2,mean))
+
+# Calculating sigma from phi
+sqrt(1/mean(res3$phi[2500:5000]))
+
+#Calculate Root MSE
+yhat3 <- X %*% bayescoef3
+sqrt(sum((yhat3-Y)^2)/(n-4-1))
+
+#HPD intervals 
+
+beta3.mcmc = as.mcmc(res3$beta[2500:5000,])           # Coerce the vector into a MCMC object
+HPDinterval(beta3.mcmc, prob = 0.95)                  # Find 95% HPD interval for theta using the CODA function
+
+phi3.mcmc = as.mcmc(res3$phi[2500:5000])             # Coerce the vector into a MCMC object
+HPDinterval(sqrt(1/phi3.mcmc), prob = 0.95)                  # Find 95% HPD interval for theta using the CODA function
+
+par(mfrow=c(1,1))
+plot(beta3.mcmc)
+plot(phi3.mcmc)
+autocorr.plot(beta3.mcmc)   #Check autocorrelation
+autocorr.plot(phi3.mcmc)   #Check autocorrelation
+effectiveSize(beta3.mcmc)   #Check effective size
+effectiveSize(phi3.mcmc)   #Check effective size
+geweke.diag(beta3.mcmc)   #Check for convergence using Geweke diagnostic -- absolute values beyond 2 suggest poor mixing
+geweke.diag(phi3.mcmc)   #Check for convergence using Geweke diagnostic -- absolute values beyond 2 suggest poor mixing
+```
+Because phi has not quite converged, according to Geweke diagnostic, consider a longer burn-in:
+```{r}
+phi3b.mcmc = as.mcmc(res3$phi[2600:5000])
+sqrt(1/mean(phi3b.mcmc))   # Calculating sigma from phi
+HPDinterval(sqrt(1/phi3b.mcmc), prob = 0.95)                  # Find 95% HPD interval for theta using the CODA function
+effectiveSize(phi3b.mcmc)   #Check effective size
+geweke.diag(phi3b.mcmc)   #Check for convergence using Geweke diagnostic -- absolute values beyond 2 suggest poor mixing
+```
+
